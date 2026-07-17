@@ -20,10 +20,11 @@ class HttpErrorLogManager:
     def _create_logger(self, name: str, file: str) -> logging.Logger:
         logger = logging.getLogger(name)
         logger.setLevel(logging.ERROR)
-        handler = logging.FileHandler(file)
-        formatter = logging.Formatter('%(asctime)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        if not logger.handlers:
+            handler = logging.FileHandler(file)
+            formatter = logging.Formatter('%(asctime)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
         return logger
 
     def log_error(self, status_code: int, message: str):

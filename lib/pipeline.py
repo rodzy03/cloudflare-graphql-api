@@ -6,7 +6,7 @@ DataFrames: path extraction, cleaning, aggregation, time-range generation, and
 CSV export. No HTTP calls happen here — that lives in lib/cloudflare.py.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import pandas as pd
@@ -67,7 +67,7 @@ def generate_time_ranges(reference_time: datetime = None):
         (ranges, reference_time): list of (start, end) ISO strings + the base datetime.
     """
     if reference_time is None:
-        reference_time = datetime.utcnow()
+        reference_time = datetime.now(timezone.utc)
 
     ranges = []
     for i in range(QUERY_DAYS_BACK, 0, -1):
@@ -201,3 +201,27 @@ def validate_response_chunk_limit(response_chunk: list, limit: int = 10000, star
         print("Consider reducing QUERY_HOUR_INTERVAL in config.py to avoid losing data.")
         return True
     return False
+
+
+def normalize_and_clean_http_data(raw_data: list) -> tuple:
+    """
+    Normalize, aggregate, and clean raw httpRequestsAdaptiveGroups records.
+
+    Strips country prefixes so /gb/education/search and /us/education/search
+    are counted together, then filters out static assets and noise paths.
+
+    Returns (aggregated, cleaned_paths):
+        aggregated:    dict mapping canonical path → total request count
+        cleaned_paths: set of canonical paths that survived the filter
+    """
+    aggregated = {}
+    for item in raw_data:
+        canonical = normalize_path(item["dimensions"]["clientRequestPath"])
+        aggregated[canonical] = aggregated.get(canonical, 0) + item["count"]
+
+    if not aggregated:
+        return aggregated, set()
+
+    df = pd.DataFrame([{"path": p} for p in aggregated])
+    df = clean_and_filter_paths(df)
+    return aggregated, set(df["path"].tolist())

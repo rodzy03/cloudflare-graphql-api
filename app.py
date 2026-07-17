@@ -14,6 +14,8 @@ Module layout:
     lib/routes.py      — Flask Blueprint with all route handlers
 """
 
+import os
+
 from flask import Flask
 from lib.config import validate_config
 from lib.routes import bp
@@ -24,4 +26,4 @@ app = Flask(__name__)
 app.register_blueprint(bp)
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=os.getenv('FLASK_DEBUG', '0') == '1', port=5000)

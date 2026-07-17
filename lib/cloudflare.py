@@ -16,6 +16,11 @@ import requests
 
 from .config import API_TOKEN, GRAPHQL_URL, ZONE_ID, ZONE_ID_ORG, HOST, PATH, CAMBRIDGE_ORG_HOST
 
+_CF_HEADERS = {
+    "Authorization": f"Bearer {API_TOKEN}",
+    "Content-Type": "application/json",
+}
+
 
 def graphql_api_request(start: str, end: str) -> dict:
     """
@@ -49,11 +54,8 @@ def graphql_api_request(start: str, end: str) -> dict:
       }}
     }}
     '''
-    headers = {
-        "Authorization": f"Bearer {API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query}, timeout=30)
+    response = requests.post(GRAPHQL_URL, headers=_CF_HEADERS, json={'query': query}, timeout=30)
+    response.raise_for_status()
     return response.json()
 
 
@@ -91,11 +93,8 @@ def graphql_api_request_groups(start: str, end: str) -> dict:
       }}
     }}
     '''
-    headers = {
-        "Authorization": f"Bearer {API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query}, timeout=30)
+    response = requests.post(GRAPHQL_URL, headers=_CF_HEADERS, json={'query': query}, timeout=30)
+    response.raise_for_status()
     return response.json()
 
 
@@ -136,9 +135,6 @@ def graphql_api_request_http_urls(start: str, end: str) -> dict:
       }}
     }}
     '''
-    headers = {
-        "Authorization": f"Bearer {API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query}, timeout=30)
+    response = requests.post(GRAPHQL_URL, headers=_CF_HEADERS, json={'query': query}, timeout=30)
+    response.raise_for_status()
     return response.json()

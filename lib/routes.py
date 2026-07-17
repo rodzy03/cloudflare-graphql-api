@@ -12,7 +12,7 @@ window never drifts with server uptime.
 import re
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Blueprint, jsonify, request
@@ -33,13 +33,14 @@ from .pipeline import (
     extract_paths_from_cf_data,
     extract_paths_from_cf_groups,
     validate_response_chunk_limit,
-    normalize_path,
+    normalize_and_clean_http_data,
 )
 from .classifier import classify_path
 from .logger import HttpErrorLogManager
 
 bp = Blueprint('cloudflare', __name__)
 logger = HttpErrorLogManager.create()
+_PROBE_EXECUTOR = ThreadPoolExecutor(max_workers=10)
 
 # Strict format for user-supplied datetime query params (?start= / ?end=).
 # Enforced before interpolation into GraphQL f-strings to prevent injection.
@@ -48,9 +49,14 @@ _DATETIME_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
 
 def _validate_datetime_params(start_param, end_param):
     """
-    Returns a Flask error tuple (response, status_code) if either user-supplied
-    datetime param is present but malformed, or None if both are absent or valid.
+    Returns a Flask error tuple (response, status_code) if the date params are
+    invalid: one provided without the other, or either is malformed. Returns None
+    if both are absent or both are valid.
     """
+    if (start_param is None) != (end_param is None):
+        return jsonify({
+            "error": "Both 'start' and 'end' parameters must be provided together."
+        }), 400
     for name, val in [("start", start_param), ("end", end_param)]:
         if val is not None and not _DATETIME_RE.match(val):
             return jsonify({
@@ -68,7 +74,7 @@ def _resolve_date_range(start_param, end_param):
     """
     if start_param and end_param:
         return start_param, end_param
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     start = (now - timedelta(days=QUERY_DAYS_BACK)).strftime('%Y-%m-%dT%H:%M:%SZ')
     end = now.strftime('%Y-%m-%dT%H:%M:%SZ')
     return start, end
@@ -76,14 +82,17 @@ def _resolve_date_range(start_param, end_param):
 
 def _check_cf_errors(response, context=""):
     """
-    Returns a Flask error tuple if the Cloudflare response contains an errors key,
-    logs the error, and returns None otherwise.
+    Returns a Flask error tuple if the Cloudflare response contains an errors key
+    or a null data field, logs the error, and returns None otherwise.
     """
+    label = f" ({context})" if context else ""
     if response.get("errors"):
         msg = response["errors"][0]["message"]
-        label = f" ({context})" if context else ""
         logger.log_error(500, f"Cloudflare API error{label}: {msg}")
         return jsonify({"error": f"Cloudflare API error: {msg}"}), 500
+    if response.get("data") is None:
+        logger.log_error(500, f"Cloudflare API returned null data{label}")
+        return jsonify({"error": "Cloudflare API returned no data."}), 500
     return None
 
 
@@ -160,12 +169,17 @@ def top_urls():
         return jsonify({"error": error_msg}), status_code
 
     try:
-        # Fresh per request so the query window doesn't drift with server uptime.
         ranges, _ = generate_time_ranges()
 
+        def _fetch(start_end):
+            s, e = start_end
+            return s, e, graphql_api_request(s, e)
+
+        with ThreadPoolExecutor(max_workers=min(len(ranges), 10)) as executor:
+            fetched = list(executor.map(_fetch, ranges))
+
         raw_data = []
-        for start, end in ranges:
-            response = graphql_api_request(start, end)
+        for start, end, response in fetched:
             err = _check_cf_errors(response, context=f"chunk {start}–{end}")
             if err:
                 return err
@@ -229,18 +243,7 @@ def http_urls():
         if not raw_data:
             return jsonify({"error": "No HTTP traffic found for this period."}), 400
 
-        # Strip country prefix (/gb/, /us/, etc.) so /gb/education/search and
-        # /us/education/search are counted together as /education/search
-        aggregated = {}
-        for item in raw_data:
-            raw_path = item["dimensions"]["clientRequestPath"]
-            canonical = normalize_path(raw_path)
-            aggregated[canonical] = aggregated.get(canonical, 0) + item["count"]
-
-        # Remove static assets, Cloudflare internals, and noise paths
-        df = pd.DataFrame([{"path": p} for p in aggregated])
-        df = clean_and_filter_paths(df)
-        cleaned_paths = set(df["path"].tolist())
+        aggregated, cleaned_paths = normalize_and_clean_http_data(raw_data)
 
         rows = [
             {"path": canonical, "count": count, "stream": classify_path(canonical)}
@@ -314,16 +317,7 @@ def http_urls_verify():
         if not raw_data:
             return jsonify({"error": "No HTTP traffic found for this period."}), 400
 
-        # Same normalise-and-clean pipeline as /http-urls
-        aggregated = {}
-        for item in raw_data:
-            raw_path = item["dimensions"]["clientRequestPath"]
-            canonical = normalize_path(raw_path)
-            aggregated[canonical] = aggregated.get(canonical, 0) + item["count"]
-
-        df = pd.DataFrame([{"path": p} for p in aggregated])
-        df = clean_and_filter_paths(df)
-        cleaned_paths = set(df["path"].tolist())
+        aggregated, cleaned_paths = normalize_and_clean_http_data(raw_data)
 
         candidates = [
             {"path": canonical, "count": count, "stream": classify_path(canonical)}
@@ -347,12 +341,11 @@ def http_urls_verify():
             return None
 
         confirmed = []
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(probe, row): row for row in candidates}
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    confirmed.append(result)
+        futures = {_PROBE_EXECUTOR.submit(probe, row): row for row in candidates}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                confirmed.append(result)
 
         confirmed.sort(key=lambda r: r["count"], reverse=True)
 
