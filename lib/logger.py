@@ -1,5 +1,12 @@
+"""
+lib/logger.py — HTTP error log manager.
+
+Writes 400- and 500-series error events to separate log files so they can be
+monitored and rotated independently.
+"""
 
 import logging
+
 
 class HttpErrorLogManager:
     """

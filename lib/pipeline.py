@@ -1,14 +1,26 @@
-from config import QUERY_DAYS_BACK, QUERY_HOUR_INTERVAL, SUB_DOMAIN
+"""
+lib/pipeline.py — Data transformation pipeline for Cloudflare Analytics results.
+
+Handles the full journey from raw Cloudflare API responses to presentation-ready
+DataFrames: path extraction, cleaning, aggregation, time-range generation, and
+CSV export. No HTTP calls happen here — that lives in lib/cloudflare.py.
+"""
+
 from datetime import datetime, timedelta
 from io import BytesIO
-from flask import send_file, jsonify
+
 import pandas as pd
 import re
+
+from flask import send_file, jsonify
+
+from .config import QUERY_DAYS_BACK, QUERY_HOUR_INTERVAL, SUB_DOMAIN
 
 # Strips a leading 2-letter country/language prefix from a path.
 # e.g. /gb/education/search → /education/search
 # This lets us aggregate traffic across all country variants of the same page.
 _LANG_PREFIX = re.compile(r'^/[a-z]{2}/')
+
 
 def normalize_path(path: str) -> str:
     """Strip leading 2-letter country/language prefix: /gb/education/... → /education/..."""

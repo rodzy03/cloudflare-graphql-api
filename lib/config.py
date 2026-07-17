@@ -1,6 +1,13 @@
 """
-Configuration settings for the Cloudflare GraphQL API.
-Adjust these values as needed for your environment.
+lib/config.py — Shared configuration for the Cloudflare GraphQL API.
+
+Configure via a .env file at the project root. Required keys:
+
+  CLOUDFLARE_API_TOKEN=<token>   API token with Analytics:Read on both zones.
+  CLOUDFLARE_ZONE_ID=<id>        Zone ID for cambridge.edu.au.
+  CLOUDFLARE_ZONE_ID_ORG=<id>    Zone ID for www.cambridge.org.
+
+See .env.example for a full template.
 """
 
 import os
@@ -26,7 +33,6 @@ HOST = "www.cambridge.edu.au"
 PATH = "education"  # Limits /get-top-urls queries to /education/* paths only
 
 # --- cambridge.org config (used by /http-urls) ---
-# Defined here so it's injectable in tests; app.py reads it directly.
 CAMBRIDGE_ORG_HOST = "www.cambridge.org"
 
 """

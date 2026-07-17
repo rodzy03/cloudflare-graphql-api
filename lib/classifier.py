@@ -1,5 +1,5 @@
 """
-Origin rule classifiers for www.cambridge.org.
+lib/classifier.py — Origin rule classifiers for www.cambridge.org.
 
 Mirrors the Cloudflare origin rules that determine which backend serves each request.
 Used to tag HTTP-traffic paths with which stream owns them.

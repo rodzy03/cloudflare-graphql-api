@@ -70,13 +70,16 @@ See `.env.example` for a template.
 ## Project Structure
 
 ```
-app.py            - Flask app: GraphQL query functions + route handlers
-config.py         - Configuration (env vars + query tuning constants)
-utils.py          - Data processing: path cleaning, aggregation, CSV export, time ranges
-origin_rules.py   - Path classifier: maps cambridge.org paths to drupal / c5 / unmatched streams
-logger.py         - HTTP error log manager (writes to error_400.log / error_500.log)
-requirements.txt  - Python dependencies
-.env.example      - Environment variable template
+app.py              - Thin entry point: creates Flask app, registers routes Blueprint, starts server
+requirements.txt    - Python dependencies
+.env.example        - Environment variable template
+lib/
+  config.py         - Cloudflare credentials and query tuning constants
+  cloudflare.py     - Cloudflare Analytics GraphQL API client (three query functions)
+  pipeline.py       - Data processing: path cleaning, aggregation, CSV export, time ranges
+  classifier.py     - Path classifier: maps cambridge.org paths to drupal / c5 / unmatched streams
+  logger.py         - HTTP error log manager (writes to error_400.log / error_500.log)
+  routes.py         - Flask Blueprint with all route handlers
 ```
 
 ## Notes
