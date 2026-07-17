@@ -12,7 +12,7 @@ from io import BytesIO
 import pandas as pd
 import re
 
-from flask import send_file, jsonify
+from flask import send_file
 
 from .config import QUERY_DAYS_BACK, QUERY_HOUR_INTERVAL, SUB_DOMAIN
 
@@ -150,7 +150,7 @@ def extract_paths_from_cf_groups(data: list) -> pd.DataFrame:
     } for row in data])
 
 
-def aggregate_top_urls(df: pd.DataFrame, reference_time: datetime, days_back: int) -> pd.DataFrame:
+def aggregate_top_urls(df: pd.DataFrame, days_back: int) -> pd.DataFrame:
     """
     Count visits per path and compute average visits per hour.
     Used by /get-top-urls (individual record data — counts are derived from value_counts).
@@ -158,14 +158,16 @@ def aggregate_top_urls(df: pd.DataFrame, reference_time: datetime, days_back: in
     result = df["path"].value_counts().reset_index()
     result.columns = ["path", "total_count"]
 
-    total_hours = (datetime.utcnow() - (reference_time - timedelta(days=days_back))).total_seconds() / 3600
+    # The query window is always exactly days_back * 24 hours.
+    # Using a fixed denominator avoids visit_per_hour drifting as the server ages.
+    total_hours = days_back * 24
     result["visit_per_hour"] = (result["total_count"] / total_hours).round(4)
     result["total_count"] = result.apply(format_count, axis=1)
     result["path"] = SUB_DOMAIN + result["path"]
     return result
 
 
-def aggregate_top_urls_from_groups(df: pd.DataFrame, reference_time: datetime, days_back: int) -> pd.DataFrame:
+def aggregate_top_urls_from_groups(df: pd.DataFrame, days_back: int) -> pd.DataFrame:
     """
     Sum pre-aggregated counts per path and compute average visits per hour.
     Used by /get-top-urls-groups (Cloudflare already grouped — counts come from the API).
@@ -174,7 +176,7 @@ def aggregate_top_urls_from_groups(df: pd.DataFrame, reference_time: datetime, d
     result = result.rename(columns={"count": "total_count"})
     result = result.sort_values("total_count", ascending=False).reset_index(drop=True)
 
-    total_hours = (datetime.utcnow() - (reference_time - timedelta(days=days_back))).total_seconds() / 3600
+    total_hours = days_back * 24
     result["visit_per_hour"] = (result["total_count"] / total_hours).round(4)
     result["total_count"] = result.apply(format_count, axis=1)
     result["path"] = SUB_DOMAIN + result["path"]
@@ -184,8 +186,7 @@ def aggregate_top_urls_from_groups(df: pd.DataFrame, reference_time: datetime, d
 def validate_top_parameter(top: int):
     """Validate that the ?top= query param is a positive integer."""
     if not top or top <= 0:
-        error_msg = "Invalid 'top' parameter. Must be a positive integer."
-        return False, jsonify({"error": error_msg}), 400
+        return False, "Invalid 'top' parameter. Must be a positive integer.", 400
     return True, None, None
 
 

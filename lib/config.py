@@ -11,6 +11,7 @@ See .env.example for a full template.
 """
 
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,3 +53,16 @@ QUERY_HOUR_INTERVAL:
 
 QUERY_DAYS_BACK = 7
 QUERY_HOUR_INTERVAL = 4
+
+
+def validate_config():
+    """Fail fast at startup if required Cloudflare credentials are missing."""
+    missing = [name for name, val in [
+        ("CLOUDFLARE_API_TOKEN", API_TOKEN),
+        ("CLOUDFLARE_ZONE_ID", ZONE_ID),
+        ("CLOUDFLARE_ZONE_ID_ORG", ZONE_ID_ORG),
+    ] if not val]
+    if missing:
+        print(f"ERROR: Missing required environment variables: {', '.join(missing)}", file=sys.stderr)
+        print("Create a .env file at the project root — see .env.example for a template.", file=sys.stderr)
+        sys.exit(1)

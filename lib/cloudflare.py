@@ -53,7 +53,7 @@ def graphql_api_request(start: str, end: str) -> dict:
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query})
+    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query}, timeout=30)
     return response.json()
 
 
@@ -76,7 +76,7 @@ def graphql_api_request_groups(start: str, end: str) -> dict:
               clientSSLProtocol: "none"
               clientRequestHTTPHost: "{HOST}"
               datetime_geq: "{start}"
-              datetime_leq: "{end}"
+              datetime_lt: "{end}"
             }}
             limit: 10000
             orderBy: [count_DESC]
@@ -95,7 +95,7 @@ def graphql_api_request_groups(start: str, end: str) -> dict:
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query})
+    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query}, timeout=30)
     return response.json()
 
 
@@ -140,5 +140,5 @@ def graphql_api_request_http_urls(start: str, end: str) -> dict:
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query})
+    response = requests.post(GRAPHQL_URL, headers=headers, json={'query': query}, timeout=30)
     return response.json()

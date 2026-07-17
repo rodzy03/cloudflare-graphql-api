@@ -15,7 +15,10 @@ Module layout:
 """
 
 from flask import Flask
+from lib.config import validate_config
 from lib.routes import bp
+
+validate_config()
 
 app = Flask(__name__)
 app.register_blueprint(bp)

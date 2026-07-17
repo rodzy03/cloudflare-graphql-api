@@ -5,13 +5,14 @@ This module is the orchestration layer: it wires together the Cloudflare client
 (lib/cloudflare.py), the data pipeline (lib/pipeline.py), and the path classifier
 (lib/classifier.py) to serve each endpoint.
 
-RANGES and reference_time are computed once at import time so all routes share
-a consistent "now" anchor for the rolling lookback window.
+Time ranges are computed fresh per request (not at import time) so the data
+window never drifts with server uptime.
 """
 
+import re
 import requests
 import pandas as pd
-from datetime import timedelta
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Blueprint, jsonify, request
@@ -40,22 +41,50 @@ from .logger import HttpErrorLogManager
 bp = Blueprint('cloudflare', __name__)
 logger = HttpErrorLogManager.create()
 
-# Computed once at startup. reference_time is the "now" anchor used for all
-# relative date calculations (so results are consistent within a single run).
-RANGES, reference_time = generate_time_ranges()
+# Strict format for user-supplied datetime query params (?start= / ?end=).
+# Enforced before interpolation into GraphQL f-strings to prevent injection.
+_DATETIME_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+
+
+def _validate_datetime_params(start_param, end_param):
+    """
+    Returns a Flask error tuple (response, status_code) if either user-supplied
+    datetime param is present but malformed, or None if both are absent or valid.
+    """
+    for name, val in [("start", start_param), ("end", end_param)]:
+        if val is not None and not _DATETIME_RE.match(val):
+            return jsonify({
+                "error": f"Invalid '{name}' parameter. Expected ISO 8601 UTC: YYYY-MM-DDTHH:MM:SSZ"
+            }), 400
+    return None
 
 
 def _resolve_date_range(start_param, end_param):
     """
     Returns (start, end) ISO datetime strings for a query.
-    If ?start= and ?end= are provided in the request, use those.
-    Otherwise fall back to the rolling window defined by QUERY_DAYS_BACK in config.
+    If ?start= and ?end= are provided (and already validated), use those.
+    Otherwise compute a fresh rolling window from now — called per request
+    so the window does not drift with server uptime.
     """
     if start_param and end_param:
         return start_param, end_param
-    start = (reference_time - timedelta(days=QUERY_DAYS_BACK)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    end = reference_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    now = datetime.utcnow()
+    start = (now - timedelta(days=QUERY_DAYS_BACK)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    end = now.strftime('%Y-%m-%dT%H:%M:%SZ')
     return start, end
+
+
+def _check_cf_errors(response, context=""):
+    """
+    Returns a Flask error tuple if the Cloudflare response contains an errors key,
+    logs the error, and returns None otherwise.
+    """
+    if response.get("errors"):
+        msg = response["errors"][0]["message"]
+        label = f" ({context})" if context else ""
+        logger.log_error(500, f"Cloudflare API error{label}: {msg}")
+        return jsonify({"error": f"Cloudflare API error: {msg}"}), 500
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -75,16 +104,19 @@ def top_urls_groups():
     top = request.args.get("top", type=int)
     generate = request.args.get("generate", type=int)
 
-    is_valid, error_response, status_code = validate_top_parameter(top)
+    is_valid, error_msg, status_code = validate_top_parameter(top)
     if not is_valid:
         logger.log_error(status_code, f"Invalid 'top' parameter: {top}")
-        return error_response, status_code
+        return jsonify({"error": error_msg}), status_code
 
     try:
-        start = (reference_time - timedelta(days=QUERY_DAYS_BACK)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        end = reference_time.strftime('%Y-%m-%dT%H:%M:%SZ')
-
+        start, end = _resolve_date_range(None, None)
         response = graphql_api_request_groups(start, end)
+
+        err = _check_cf_errors(response, context="/get-top-urls-groups")
+        if err:
+            return err
+
         raw_data = response["data"]["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]
 
         if not raw_data:
@@ -93,7 +125,7 @@ def top_urls_groups():
 
         df = extract_paths_from_cf_groups(raw_data)
         df = clean_and_filter_paths(df)
-        result = aggregate_top_urls_from_groups(df, reference_time, QUERY_DAYS_BACK).head(top)
+        result = aggregate_top_urls_from_groups(df, QUERY_DAYS_BACK).head(top)
 
         if generate:
             return export_csv(result)
@@ -122,17 +154,22 @@ def top_urls():
     top = request.args.get("top", type=int)
     generate = request.args.get("generate", type=int)
 
-    is_valid, error_response, status_code = validate_top_parameter(top)
+    is_valid, error_msg, status_code = validate_top_parameter(top)
     if not is_valid:
         logger.log_error(status_code, f"Invalid 'top' parameter: {top}")
-        return error_response, status_code
+        return jsonify({"error": error_msg}), status_code
 
     try:
-        raw_data = []
-        for start, end in RANGES:
-            response = graphql_api_request(start, end)
-            chunk = response["data"]["viewer"]["zones"][0]["httpRequestsAdaptive"]
+        # Fresh per request so the query window doesn't drift with server uptime.
+        ranges, _ = generate_time_ranges()
 
+        raw_data = []
+        for start, end in ranges:
+            response = graphql_api_request(start, end)
+            err = _check_cf_errors(response, context=f"chunk {start}–{end}")
+            if err:
+                return err
+            chunk = response["data"]["viewer"]["zones"][0]["httpRequestsAdaptive"]
             validate_response_chunk_limit(chunk, limit=10000, start=start, end=end)
             raw_data.extend(chunk)
 
@@ -142,7 +179,7 @@ def top_urls():
 
         df = extract_paths_from_cf_data(raw_data)
         df = clean_and_filter_paths(df)
-        result = (aggregate_top_urls(df, reference_time, QUERY_DAYS_BACK).head(top))
+        result = aggregate_top_urls(df, QUERY_DAYS_BACK).head(top)
 
         if generate:
             return export_csv(result)
@@ -170,16 +207,23 @@ def http_urls():
         end (str):   ISO 8601 UTC end datetime (overrides config default).
         generate (int): If 1, returns CSV download.
     """
+    start_param = request.args.get("start")
+    end_param = request.args.get("end")
     stream_filter = request.args.get("stream")
     generate = request.args.get("generate", type=int)
-    start, end = _resolve_date_range(request.args.get("start"), request.args.get("end"))
+
+    err = _validate_datetime_params(start_param, end_param)
+    if err:
+        return err
+
+    start, end = _resolve_date_range(start_param, end_param)
 
     try:
         response = graphql_api_request_http_urls(start, end)
-        if response.get("errors"):
-            msg = response["errors"][0]["message"]
-            logger.log_error(500, f"Cloudflare API error: {msg}")
-            return jsonify({"error": f"Cloudflare API error: {msg}"}), 500
+        err = _check_cf_errors(response, context="/http-urls")
+        if err:
+            return err
+
         raw_data = response["data"]["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]
 
         if not raw_data:
@@ -248,15 +292,23 @@ def http_urls_verify():
         end (str):   ISO 8601 UTC end datetime (overrides config default).
         generate (int): If 1, returns CSV download.
     """
+    start_param = request.args.get("start")
+    end_param = request.args.get("end")
     stream_filter = request.args.get("stream")
     generate = request.args.get("generate", type=int)
-    start, end = _resolve_date_range(request.args.get("start"), request.args.get("end"))
+
+    err = _validate_datetime_params(start_param, end_param)
+    if err:
+        return err
+
+    start, end = _resolve_date_range(start_param, end_param)
 
     try:
         response = graphql_api_request_http_urls(start, end)
-        if response.get("errors"):
-            msg = response["errors"][0]["message"]
-            return jsonify({"error": f"Cloudflare API error: {msg}"}), 500
+        err = _check_cf_errors(response, context="/http-urls/verify")
+        if err:
+            return err
+
         raw_data = response["data"]["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]
 
         if not raw_data:
@@ -305,8 +357,10 @@ def http_urls_verify():
         confirmed.sort(key=lambda r: r["count"], reverse=True)
 
         if generate:
-            df = pd.DataFrame(confirmed)
-            return export_csv(df.rename(columns={
+            if not confirmed:
+                return jsonify({"error": "No confirmed HTTP URLs found for this period."}), 404
+            df_out = pd.DataFrame(confirmed)
+            return export_csv(df_out.rename(columns={
                 "path": "Page URL",
                 "count": "CF HTTP hits",
                 "stream": "Stream",
