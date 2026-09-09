@@ -3,11 +3,12 @@ lib/config.py — Shared configuration for the Cloudflare GraphQL API.
 
 Configure via a .env file at the project root. Required keys:
 
-  CLOUDFLARE_API_TOKEN=<token>   API token with Analytics:Read on both zones.
-  CLOUDFLARE_ZONE_ID=<id>        Zone ID for cambridge.edu.au.
-  CLOUDFLARE_ZONE_ID_ORG=<id>    Zone ID for www.cambridge.org.
+  CLOUDFLARE_API_TOKEN=<token>   API token with Analytics:Read on the zone(s) below.
+  CLOUDFLARE_ZONE_ID=<id>        Primary zone ID, used by /get-top-urls endpoints.
+  PRIMARY_HOST=<host>            Hostname to query, e.g. www.example.com.
 
-See .env.example for a full template.
+See .env.example for the full template, including the optional secondary
+zone/host used by /http-urls endpoints.
 """
 
 import os
@@ -17,24 +18,30 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Cloudflare credentials ---
-# API token must have Analytics:Read permission for both zones.
+# API token must have Analytics:Read permission for the zone(s) below.
 API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 
-# Zone ID for cambridge.edu.au (used by /get-top-urls endpoints)
+# --- Primary zone (used by /get-top-urls and /get-top-urls-groups) ---
 ZONE_ID = os.getenv("CLOUDFLARE_ZONE_ID", "")
+PRIMARY_HOST = os.getenv("PRIMARY_HOST", "")
 
-# Zone ID for www.cambridge.org (used by /http-urls endpoints — different Cloudflare account)
-ZONE_ID_ORG = os.getenv("CLOUDFLARE_ZONE_ID_ORG", "")
+# Optional path prefix to scope /get-top-urls queries, e.g. "blog" limits to
+# /blog/*. Leave unset to match all paths.
+PRIMARY_PATH_PREFIX = os.getenv("PRIMARY_PATH_PREFIX", "").strip("/")
+
+PRIMARY_BASE_URL = f"https://{PRIMARY_HOST}" if PRIMARY_HOST else ""
+
+# --- Secondary zone (used by /http-urls endpoints) ---
+# Falls back to the primary zone/host if unset — only configure these
+# separately if that traffic lives on a different zone (e.g. a different
+# Cloudflare account) than the primary one above.
+ZONE_ID_SECONDARY = os.getenv("CLOUDFLARE_ZONE_ID_SECONDARY") or ZONE_ID
+SECONDARY_HOST = os.getenv("SECONDARY_HOST") or PRIMARY_HOST
 
 GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql"
 
-# --- cambridge.edu.au config (used by /get-top-urls) ---
-SUB_DOMAIN = "https://www.cambridge.edu.au"
-HOST = "www.cambridge.edu.au"
-PATH = "education"  # Limits /get-top-urls queries to /education/* paths only
-
-# --- cambridge.org config (used by /http-urls) ---
-CAMBRIDGE_ORG_HOST = "www.cambridge.org"
+# Path to the classifier rules file used by lib/classifier.py.
+CLASSIFIER_RULES_PATH = os.getenv("CLASSIFIER_RULES_PATH", "classifier_rules.example.json")
 
 """
 Time range configuration for querying analytics data.
@@ -60,7 +67,7 @@ def validate_config():
     missing = [name for name, val in [
         ("CLOUDFLARE_API_TOKEN", API_TOKEN),
         ("CLOUDFLARE_ZONE_ID", ZONE_ID),
-        ("CLOUDFLARE_ZONE_ID_ORG", ZONE_ID_ORG),
+        ("PRIMARY_HOST", PRIMARY_HOST),
     ] if not val]
     if missing:
         print(f"ERROR: Missing required environment variables: {', '.join(missing)}", file=sys.stderr)

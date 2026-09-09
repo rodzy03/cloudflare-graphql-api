@@ -20,6 +20,10 @@ ENV/
 .env.*
 !.env.example
 
+# Site-specific classifier rules (keep the bundled example tracked)
+classifier_rules.json
+!classifier_rules.example.json
+
 # Logs
 *.log
 

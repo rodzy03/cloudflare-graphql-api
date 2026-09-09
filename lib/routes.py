@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Blueprint, jsonify, request
 
-from .config import CAMBRIDGE_ORG_HOST, QUERY_DAYS_BACK
+from .config import SECONDARY_HOST, QUERY_DAYS_BACK
 from .cloudflare import (
     graphql_api_request,
     graphql_api_request_groups,
@@ -211,12 +211,12 @@ def top_urls():
 @bp.route('/v1/cloudflare/http-urls')
 def http_urls():
     """
-    Lists www.cambridge.org paths that received plain HTTP traffic.
+    Lists SECONDARY_HOST paths that received plain HTTP traffic.
     Data comes from Cloudflare — includes false positives (paths that may now redirect).
     Use /http-urls/verify for a live-probed, confirmed list.
 
     Query Parameters:
-        stream (str): Filter by origin stream — drupal | c5 | unmatched.
+        stream (str): Filter by classifier stream — see classifier_rules.example.json.
         start (str): ISO 8601 UTC start datetime (overrides config default).
         end (str):   ISO 8601 UTC end datetime (overrides config default).
         generate (int): If 1, returns CSV download.
@@ -265,7 +265,7 @@ def http_urls():
             }))
 
         return jsonify({
-            "host": CAMBRIDGE_ORG_HOST,
+            "host": SECONDARY_HOST,
             "protocol": "HTTP (clientSSLProtocol: none)",
             "date_range": {"start": start, "end": end},
             "count": len(rows),
@@ -290,7 +290,7 @@ def http_urls_verify():
     would time out for large candidate sets like the unmatched stream).
 
     Query Parameters:
-        stream (str): Filter before probing — drupal | c5 | unmatched.
+        stream (str): Filter before probing — see classifier_rules.example.json.
         start (str): ISO 8601 UTC start datetime (overrides config default).
         end (str):   ISO 8601 UTC end datetime (overrides config default).
         generate (int): If 1, returns CSV download.
@@ -330,7 +330,7 @@ def http_urls_verify():
 
         # Probe each candidate over plain HTTP (no redirect following)
         def probe(row):
-            url = f"http://{CAMBRIDGE_ORG_HOST}{row['path']}"
+            url = f"http://{SECONDARY_HOST}{row['path']}"
             try:
                 resp = requests.get(url, allow_redirects=False, timeout=10)
                 # Only include URLs that serve content (200), not those that redirect
@@ -361,7 +361,7 @@ def http_urls_verify():
             }))
 
         return jsonify({
-            "host": CAMBRIDGE_ORG_HOST,
+            "host": SECONDARY_HOST,
             "date_range": {"start": start, "end": end},
             "count": len(confirmed),
             "data": confirmed

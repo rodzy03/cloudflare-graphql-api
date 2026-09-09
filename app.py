@@ -9,7 +9,7 @@ Module layout:
     lib/config.py      — Cloudflare credentials and query tuning constants
     lib/cloudflare.py  — Cloudflare Analytics GraphQL API client (three query functions)
     lib/pipeline.py    — Data processing: path cleaning, aggregation, CSV export, time ranges
-    lib/classifier.py  — Path classifier: maps cambridge.org paths to drupal / c5 / unmatched
+    lib/classifier.py  — Path classifier: tags paths with a stream from classifier_rules.json
     lib/logger.py      — HTTP error log manager (error_400.log / error_500.log)
     lib/routes.py      — Flask Blueprint with all route handlers
 """

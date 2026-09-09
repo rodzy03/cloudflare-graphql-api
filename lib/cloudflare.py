@@ -14,7 +14,7 @@ Two dataset types are used:
 
 import requests
 
-from .config import API_TOKEN, GRAPHQL_URL, ZONE_ID, ZONE_ID_ORG, HOST, PATH, CAMBRIDGE_ORG_HOST
+from .config import API_TOKEN, GRAPHQL_URL, ZONE_ID, ZONE_ID_SECONDARY, PRIMARY_HOST, PRIMARY_PATH_PREFIX, SECONDARY_HOST
 
 _CF_HEADERS = {
     "Authorization": f"Bearer {API_TOKEN}",
@@ -29,19 +29,20 @@ def graphql_api_request(start: str, end: str) -> dict:
 
     Filters:
       - Only real user traffic (likely_human + eyeball source)
-      - Scoped to HOST and PATH prefix
+      - Scoped to PRIMARY_HOST and PRIMARY_PATH_PREFIX (if set)
       - Chunked into QUERY_HOUR_INTERVAL windows to stay under the 10k record limit
     """
+    path_like = f"/{PRIMARY_PATH_PREFIX}%" if PRIMARY_PATH_PREFIX else "%"
     query = f'''
     {{
       viewer {{
         zones(filter: {{ zoneTag: "{ZONE_ID}" }}) {{
           httpRequestsAdaptive(
             filter: {{
-                clientRequestHTTPHost: "{HOST}",
+                clientRequestHTTPHost: "{PRIMARY_HOST}",
                 botManagementDecision_in: ["likely_human"],
                 requestSource_in: ["eyeball"],
-                clientRequestPath_like: "/{PATH}%",
+                clientRequestPath_like: "{path_like}",
                 datetime_geq: "{start}",
                 datetime_lt: "{end}"
             }}
@@ -67,7 +68,7 @@ def graphql_api_request_groups(start: str, end: str) -> dict:
 
     Filters:
       - clientSSLProtocol: "none" → plain HTTP traffic only (no TLS)
-      - Scoped to HOST (cambridge.edu.au zone)
+      - Scoped to PRIMARY_HOST
     """
     query = f'''
     {{
@@ -76,7 +77,7 @@ def graphql_api_request_groups(start: str, end: str) -> dict:
           httpRequestsAdaptiveGroups(
             filter: {{
               clientSSLProtocol: "none"
-              clientRequestHTTPHost: "{HOST}"
+              clientRequestHTTPHost: "{PRIMARY_HOST}"
               datetime_geq: "{start}"
               datetime_lt: "{end}"
             }}
@@ -100,7 +101,7 @@ def graphql_api_request_groups(start: str, end: str) -> dict:
 
 def graphql_api_request_http_urls(start: str, end: str) -> dict:
     """
-    Fetches pre-aggregated HTTP-only traffic for www.cambridge.org.
+    Fetches pre-aggregated HTTP-only traffic for SECONDARY_HOST.
     Used by /http-urls and /http-urls/verify.
 
     Key filters:
@@ -109,16 +110,16 @@ def graphql_api_request_http_urls(start: str, end: str) -> dict:
                                      Note: this reflects the origin status, not the final
                                      Cloudflare edge response — some of these paths may
                                      still redirect at the edge. /verify confirms live state.
-      - ZONE_ID_ORG                → cambridge.org zone (different account from cambridge.edu.au)
+      - ZONE_ID_SECONDARY          → falls back to the primary zone if not configured separately
     """
     query = f'''
     {{
       viewer {{
-        zones(filter: {{ zoneTag: "{ZONE_ID_ORG}" }}) {{
+        zones(filter: {{ zoneTag: "{ZONE_ID_SECONDARY}" }}) {{
           httpRequestsAdaptiveGroups(
             filter: {{
               clientSSLProtocol: "none"
-              clientRequestHTTPHost: "{CAMBRIDGE_ORG_HOST}"
+              clientRequestHTTPHost: "{SECONDARY_HOST}"
               edgeResponseStatus: 200
               datetime_geq: "{start}"
               datetime_leq: "{end}"

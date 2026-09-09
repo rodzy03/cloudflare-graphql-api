@@ -14,7 +14,7 @@ import re
 
 from flask import send_file
 
-from .config import QUERY_DAYS_BACK, QUERY_HOUR_INTERVAL, SUB_DOMAIN
+from .config import QUERY_DAYS_BACK, QUERY_HOUR_INTERVAL, PRIMARY_BASE_URL, PRIMARY_PATH_PREFIX
 
 # Strips a leading 2-letter country/language prefix from a path.
 # e.g. /gb/education/search → /education/search
@@ -83,15 +83,13 @@ def generate_time_ranges(reference_time: datetime = None):
 
 
 # Paths that are never meaningful content (admin tools, static pipelines, etc.)
+# When PRIMARY_PATH_PREFIX is set, these common CMS/build-tool noise paths are
+# excluded from beneath it too (e.g. PRIMARY_PATH_PREFIX="blog" also excludes
+# /blog/files, /blog/themes, ...).
+_NOISE_SUFFIXES = ("/files", "/themes", "/packages", "/updates", "/tools", "/image", "/dashboard")
 EXCLUDED_PREFIXES = (
-    "/education/files",
-    "/education/themes",
-    "/education/packages",
-    "/education/updates",
-    "/education/tools",
-    "/education/image",
-    "/education/dashboard",
-    "/education___",
+    tuple(f"/{PRIMARY_PATH_PREFIX}{suffix}" for suffix in _NOISE_SUFFIXES) if PRIMARY_PATH_PREFIX else ()
+) + (
     "/cdn-cgi/",   # Cloudflare internal challenge/bot-management paths
 )
 
@@ -163,7 +161,7 @@ def aggregate_top_urls(df: pd.DataFrame, days_back: int) -> pd.DataFrame:
     total_hours = days_back * 24
     result["visit_per_hour"] = (result["total_count"] / total_hours).round(4)
     result["total_count"] = result.apply(format_count, axis=1)
-    result["path"] = SUB_DOMAIN + result["path"]
+    result["path"] = PRIMARY_BASE_URL + result["path"]
     return result
 
 
@@ -179,7 +177,7 @@ def aggregate_top_urls_from_groups(df: pd.DataFrame, days_back: int) -> pd.DataF
     total_hours = days_back * 24
     result["visit_per_hour"] = (result["total_count"] / total_hours).round(4)
     result["total_count"] = result.apply(format_count, axis=1)
-    result["path"] = SUB_DOMAIN + result["path"]
+    result["path"] = PRIMARY_BASE_URL + result["path"]
     return result
 
 
